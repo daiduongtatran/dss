@@ -1,0 +1,5 @@
+model,tn,fp,fn,tp
+Most frequent,0,678,0,1022
+Logistic Regression,579,99,148,874
+Random Forest,562,116,128,894
+XGBoost,568,110,126,896

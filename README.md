@@ -53,6 +53,14 @@ python src/preprocess.py
 
 **Notebook EDA:** mở `notebooks/01_eda.ipynb` trong VS Code, chọn kernel `.venv`, bấm *Run All*.
 
+**Huấn luyện và đánh giá mô hình** (5-fold cross-validation và tuning chỉ trên tập huấn luyện):
+
+```powershell
+python src/train.py
+```
+
+Lệnh này so sánh baseline, Logistic Regression, Random Forest và XGBoost; đánh giá một lần trên tập kiểm tra độc lập; chọn pipeline cuối theo ROC-AUC trung bình của cross-validation (không dùng kết quả tập kiểm tra để chọn mô hình). Kết quả được lưu tại `models/model.joblib`, `models/metrics.csv`, `models/cv_metrics.csv` (trung bình/độ lệch chuẩn 5-fold) và `models/confusion_matrices.csv`.
+
 **Ứng dụng demo** (sẽ có khi hoàn thành):
 
 ```powershell

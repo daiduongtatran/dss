@@ -1,0 +1,22 @@
+feature,importance
+chronotype,1.8849811688200027
+bedtime_phone_minutes,1.8435215230266417
+occupation_type_Healthcare / Shift Worker,0.6810861918158562
+occupation_type_Corporate 9-to-5,0.5264972044681158
+occupation_type_Student,0.3667535826369148
+occupation_type_Remote Tech,0.3460143947544575
+gender_Male,0.24732888477262752
+occupation_type_Freelance / Creative,0.2399948401959864
+gender_Female,0.1803418319886607
+caffeine_post_5pm_mg,0.08091417538912633
+primary_bedtime_app_YouTube,0.07124056857260411
+primary_bedtime_app_News / Reading,0.06900695430759902
+primary_bedtime_app_TikTok / Reels,0.05980167057804071
+primary_bedtime_app_Streaming (Netflix/Hulu),0.05893644324283256
+blue_light_filter_active,0.0528333567101399
+physical_activity_min,0.05146809463525757
+primary_bedtime_app_Messaging / Chat,0.047911386975953894
+gender_Non-Binary,0.02214205023457245
+primary_bedtime_app_Instagram / Reddit,0.020744682497465045
+screen_brightness_pct,0.01806802402175736
+age,0.0019148655637509402

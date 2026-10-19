@@ -4,9 +4,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import joblib
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import shap
+from sklearn.calibration import CalibrationDisplay
 from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -15,13 +20,8 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import (
-    GridSearchCV,
-    StratifiedKFold,
-    cross_validate,
-)
+from sklearn.model_selection import GridSearchCV, StratifiedKFold, cross_validate
 from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LogisticRegression
 from xgboost import XGBClassifier
 
 if __package__:
@@ -31,6 +31,7 @@ else:
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
+REPORTS_DIR = ROOT / "reports" / "figures"
 RANDOM_STATE = 42
 SCORING = {
     "accuracy": "accuracy",
@@ -47,11 +48,11 @@ CV_METRIC_COLUMNS = ["model"] + [
 ]
 
 
-def make_pipeline(classifier) -> Pipeline:
+def make_pipeline(classifier, *, include_leakage: bool = False) -> Pipeline:
     """Build a pipeline so preprocessing is fitted inside each CV fold."""
     return Pipeline(
         [
-            ("prep", build_preprocessor()),
+            ("prep", build_preprocessor(include_leakage=include_leakage)),
             ("model", classifier),
         ]
     )
@@ -84,6 +85,7 @@ def _evaluate(model_name: str, model: Pipeline, X_test, y_test) -> tuple[dict, d
 def train_and_evaluate() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Tune on the training split, evaluate once on the held-out test split."""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     X_train, X_test, y_train, y_test = prepare_data(random_state=RANDOM_STATE)
     cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
 
@@ -127,7 +129,7 @@ def train_and_evaluate() -> tuple[pd.DataFrame, pd.DataFrame]:
     cv_rows = []
 
     baseline_name = "Most frequent"
-    baseline = make_pipeline(DummyClassifier(strategy="most_frequent"))
+    baseline = make_pipeline(DummyClassifier(strategy="most_frequent"), include_leakage=False)
     baseline_scores = cross_validate(
         baseline,
         X_train,
@@ -149,7 +151,7 @@ def train_and_evaluate() -> tuple[pd.DataFrame, pd.DataFrame]:
 
     for model_name, (classifier, param_grid) in candidate_specs.items():
         search = GridSearchCV(
-            estimator=make_pipeline(classifier),
+            estimator=make_pipeline(classifier, include_leakage=False),
             param_grid=param_grid,
             scoring=SCORING,
             refit="roc_auc",
@@ -201,12 +203,70 @@ def train_and_evaluate() -> tuple[pd.DataFrame, pd.DataFrame]:
         index=False,
     )
 
+    leakage_rows = []
+    for include_leakage in (False, True):
+        leak_X_train, leak_X_test, leak_y_train, leak_y_test = prepare_data(
+            include_leakage=include_leakage,
+            random_state=RANDOM_STATE,
+        )
+        leakage_model = make_pipeline(
+            LogisticRegression(max_iter=2000, random_state=RANDOM_STATE, class_weight="balanced"),
+            include_leakage=include_leakage,
+        )
+        leakage_model.fit(leak_X_train, leak_y_train)
+        leak_metrics, _ = _evaluate(
+            f"Logistic Regression (leakage={include_leakage})",
+            leakage_model,
+            leak_X_test,
+            leak_y_test,
+        )
+        leakage_rows.append({
+            "include_leakage": include_leakage,
+            "model": "Logistic Regression",
+            "accuracy": leak_metrics["accuracy"],
+            "precision": leak_metrics["precision"],
+            "recall": leak_metrics["recall"],
+            "f1": leak_metrics["f1"],
+            "roc_auc": leak_metrics["roc_auc"],
+        })
+
+    leakage_df = pd.DataFrame(leakage_rows)
+    leakage_df.to_csv(MODELS_DIR / "leakage_comparison.csv", index=False)
+
+    model_for_importance = selected_model
+    preprocessor = model_for_importance.named_steps["prep"]
+    transformed_train = preprocessor.transform(X_train)
+    explainer = shap.LinearExplainer(model_for_importance.named_steps["model"], transformed_train)
+    shap_values = explainer.shap_values(transformed_train)
+    if isinstance(shap_values, list):
+        shap_values = shap_values[1]
+    feature_names = preprocessor.get_feature_names_out()
+    feature_importance = pd.DataFrame(
+        {
+            "feature": feature_names,
+            "importance": np.abs(shap_values).mean(axis=0),
+        }
+    ).sort_values("importance", ascending=False)
+    feature_importance.to_csv(MODELS_DIR / "feature_importance.csv", index=False)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    CalibrationDisplay.from_estimator(selected_model, X_test, y_test, n_bins=10, strategy="uniform", ax=ax)
+    ax.set_title("Calibration curve - final model")
+    fig.tight_layout()
+    fig.savefig(REPORTS_DIR / "calibration_curve.png", dpi=200)
+    plt.close(fig)
+
     print(f"Training rows: {len(X_train)}; test rows: {len(X_test)}")
     print(f"Selected model by mean 5-fold CV ROC-AUC: {selected_name}")
     print("\n5-fold CV mean and standard deviation:")
     print(cv_metrics.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
     print("\nHeld-out test metrics:")
     print(metrics.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+    print("\nLeakage comparison:")
+    print(leakage_df.to_string(index=False, float_format=lambda value: f"{value:.4f}"))
+    print(f"\nSaved leakage comparison to {MODELS_DIR / 'leakage_comparison.csv'}")
+    print(f"Saved feature importance to {MODELS_DIR / 'feature_importance.csv'}")
+    print(f"Saved calibration plot to {REPORTS_DIR / 'calibration_curve.png'}")
     print(f"\nSaved final pipeline to {MODELS_DIR / 'model.joblib'}")
     print(f"Saved test metrics to {MODELS_DIR / 'metrics.csv'}")
     print(f"Saved CV metrics to {MODELS_DIR / 'cv_metrics.csv'}")

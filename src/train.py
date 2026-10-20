@@ -187,7 +187,15 @@ def train_and_evaluate() -> tuple[pd.DataFrame, pd.DataFrame]:
     cv_auc = cv_metrics.set_index("model")["roc_auc_mean"].drop(baseline_name)
     selected_name = cv_auc.idxmax()
     selected_model = fitted_models[selected_name]
-    joblib.dump(selected_model, MODELS_DIR / "model.joblib")
+    model_path = MODELS_DIR / "model.joblib"
+    if not isinstance(selected_model, Pipeline):
+        raise TypeError("Mô hình cuối phải là một sklearn Pipeline duy nhất.")
+    joblib.dump(selected_model, model_path)
+    persisted_model = joblib.load(model_path)
+    if not isinstance(persisted_model, Pipeline):
+        raise TypeError(f"Model lưu tại {model_path} không phải sklearn Pipeline.")
+    if not callable(getattr(persisted_model, "predict_proba", None)):
+        raise TypeError(f"Model lưu tại {model_path} không hỗ trợ predict_proba.")
 
     metric_rows = []
     confusion_rows = []

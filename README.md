@@ -61,6 +61,8 @@ python src/train.py
 
 Lệnh này so sánh baseline, Logistic Regression, Random Forest và XGBoost; đánh giá một lần trên tập kiểm tra độc lập; chọn pipeline cuối theo ROC-AUC trung bình của cross-validation (không dùng kết quả tập kiểm tra để chọn mô hình). Kết quả được lưu tại `models/model.joblib`, `models/metrics.csv`, `models/cv_metrics.csv` (trung bình/độ lệch chuẩn 5-fold) và `models/confusion_matrices.csv`.
 
+Notebook `notebooks/02_model.ipynb` chạy cùng quy trình huấn luyện này, kiểm tra `model.joblib` là một Pipeline duy nhất và xác nhận xác suất nguy cơ khớp với `predict_risk` dùng trong ứng dụng. Có thể mở notebook và chọn **Run All**.
+
 **Ứng dụng demo** (sẽ có khi hoàn thành):
 
 ```powershell

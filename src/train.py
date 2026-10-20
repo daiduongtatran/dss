@@ -82,6 +82,34 @@ def _evaluate(model_name: str, model: Pipeline, X_test, y_test) -> tuple[dict, d
     return metrics, matrix
 
 
+def _shap_importance(model: Pipeline, X_train) -> pd.DataFrame:
+    """Mean |SHAP| theo từng đặc trưng sau mã hóa, dùng được cho mọi mô hình ứng viên.
+
+    Mô hình tuyến tính dùng LinearExplainer, mô hình cây (Random Forest, XGBoost)
+    dùng TreeExplainer. Lưu ý đơn vị khác nhau (log-odds với LR/XGBoost, xác suất
+    với Random Forest), nên chỉ so thứ hạng trong cùng một file, không so giữa các mô hình.
+    """
+    preprocessor = model.named_steps["prep"]
+    classifier = model.named_steps["model"]
+    transformed = preprocessor.transform(X_train)
+    if isinstance(classifier, LogisticRegression):
+        explainer = shap.LinearExplainer(classifier, transformed)
+    else:
+        explainer = shap.TreeExplainer(classifier)
+    values = explainer.shap_values(transformed)
+    if isinstance(values, list):  # bản shap cũ: danh sách theo lớp
+        values = values[1]
+    values = np.asarray(values)
+    if values.ndim == 3:  # (mẫu, đặc trưng, lớp): lấy lớp 1 = nợ ngủ đáng kể
+        values = values[:, :, 1]
+    return pd.DataFrame(
+        {
+            "feature": preprocessor.get_feature_names_out(),
+            "importance": np.abs(values).mean(axis=0),
+        }
+    ).sort_values("importance", ascending=False)
+
+
 def train_and_evaluate() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Tune on the training split, evaluate once on the held-out test split."""
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -241,20 +269,7 @@ def train_and_evaluate() -> tuple[pd.DataFrame, pd.DataFrame]:
     leakage_df = pd.DataFrame(leakage_rows)
     leakage_df.to_csv(MODELS_DIR / "leakage_comparison.csv", index=False)
 
-    model_for_importance = selected_model
-    preprocessor = model_for_importance.named_steps["prep"]
-    transformed_train = preprocessor.transform(X_train)
-    explainer = shap.LinearExplainer(model_for_importance.named_steps["model"], transformed_train)
-    shap_values = explainer.shap_values(transformed_train)
-    if isinstance(shap_values, list):
-        shap_values = shap_values[1]
-    feature_names = preprocessor.get_feature_names_out()
-    feature_importance = pd.DataFrame(
-        {
-            "feature": feature_names,
-            "importance": np.abs(shap_values).mean(axis=0),
-        }
-    ).sort_values("importance", ascending=False)
+    feature_importance = _shap_importance(selected_model, X_train)
     feature_importance.to_csv(MODELS_DIR / "feature_importance.csv", index=False)
 
     fig, ax = plt.subplots(figsize=(8, 6))

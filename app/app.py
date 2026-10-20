@@ -63,6 +63,21 @@ FIELD_LABELS = {
     "chronotype": "Nhịp sinh học (Chronotype)",
 }
 
+# Từ điển dịch thuật giá trị sang tiếng Việt (Hiển thị UI)
+DICTS_GIOI_TINH = {"Male": "Nam", "Female": "Nữ"}
+DICTS_NHIP_SINH_HOC = {
+    "Morning Lark": "Dậy sớm", 
+    "Intermediate": "Tiêu chuẩn", 
+    "Night Owl": "Thức khuya"
+}
+DICTS_NGHE_NGHIEP = {
+    "Student": "Sinh viên / Học sinh",
+    "Corporate 9-to-5": "Nhân viên văn phòng (Giờ hành chính)",
+    "Remote Tech": "Công nghệ / IT làm việc từ xa",
+    "Freelance / Creative": "Làm tự do / Sáng tạo (Freelance)",
+    "Healthcare / Shift Worker": "Y tế / Làm ca"
+}
+
 PRESET_PROFILES = {
     "Mặc định (Người dùng nặng - Sinh viên)": {
         "bedtime_phone_minutes": 120,
@@ -102,14 +117,12 @@ PRESET_PROFILES = {
     },
 }
 
-
 def _badge_color(level: str) -> str:
     if level == "Thấp":
         return "green"
     if level == "Trung bình":
         return "orange"
     return "red"
-
 
 # ---------------------------------------------------------------------------
 # Tiêu đề & Thanh bên (Sidebar nhập hồ sơ 10 trường)
@@ -144,7 +157,7 @@ with st.sidebar:
     blue_light_filter_active = st.selectbox(
         FIELD_LABELS["blue_light_filter_active"],
         options=[0, 1],
-        format_func=lambda x: "Đang bật (1)" if x == 1 else "Đang tắt (0)",
+        format_func=lambda x: "Đang bật" if x == 1 else "Đang tắt", 
         index=int(preset["blue_light_filter_active"]),
     )
     screen_brightness_pct = st.slider(
@@ -164,7 +177,7 @@ with st.sidebar:
     physical_activity_min = st.slider(
         FIELD_LABELS["physical_activity_min"],
         min_value=int(NUMERIC_RANGES["physical_activity_min"][0]),
-        max_value=int(NUMERIC_RANGES["physical_activity_min"][1]),
+        max_value=120, 
         value=int(preset["physical_activity_min"]),
         step=5,
     )
@@ -177,19 +190,27 @@ with st.sidebar:
         value=int(preset["age"]),
         step=1,
     )
+    
+    # Lọc danh sách: Chỉ giữ lại "Male" và "Female", loại bỏ "Non-binary"
+    gender_options = [g for g in CATEGORY_VALUES["gender"] if g in ["Male", "Female"]]
+    
     gender = st.selectbox(
         FIELD_LABELS["gender"],
-        options=CATEGORY_VALUES["gender"],
-        index=CATEGORY_VALUES["gender"].index(preset["gender"]),
+        options=gender_options,
+        format_func=lambda x: DICTS_GIOI_TINH.get(x, x),
+        # Đảm bảo index không bị lỗi nếu hồ sơ mẫu lỡ chứa giá trị bị loại bỏ
+        index=0 if preset["gender"] not in gender_options else gender_options.index(preset["gender"]),
     )
     occupation_type = st.selectbox(
         FIELD_LABELS["occupation_type"],
         options=CATEGORY_VALUES["occupation_type"],
+        format_func=lambda x: DICTS_NGHE_NGHIEP.get(x, x),
         index=CATEGORY_VALUES["occupation_type"].index(preset["occupation_type"]),
     )
     chronotype = st.selectbox(
         FIELD_LABELS["chronotype"],
         options=CATEGORY_VALUES["chronotype"],
+        format_func=lambda x: DICTS_NHIP_SINH_HOC.get(x, x),
         index=CATEGORY_VALUES["chronotype"].index(preset["chronotype"]),
     )
 
@@ -280,11 +301,27 @@ with tab_result:
         for f in factors:
             st.markdown(f)
 
+        # Đã cập nhật để việt hóa cột Index và các giá trị tiếng Anh
         with st.expander("Xem chi tiết 10 trường đầu vào hiện tại"):
-            st.dataframe(
-                pd.DataFrame([profile]).T.rename(columns={0: "Giá trị"}),
-                use_container_width=True,
+            df_detail = pd.DataFrame([profile]).T.rename(
+                columns={0: "Giá trị"}, 
+                index=FIELD_LABELS
             )
+            
+            for idx in df_detail.index:
+                val = df_detail.loc[idx, "Giá trị"]
+                if val in DICTS_GIOI_TINH:
+                    df_detail.loc[idx, "Giá trị"] = DICTS_GIOI_TINH[val]
+                elif val in DICTS_NGHE_NGHIEP:
+                    df_detail.loc[idx, "Giá trị"] = DICTS_NGHE_NGHIEP[val]
+                elif val in DICTS_NHIP_SINH_HOC:
+                    df_detail.loc[idx, "Giá trị"] = DICTS_NHIP_SINH_HOC[val]
+                elif val == 1 and idx == FIELD_LABELS["blue_light_filter_active"]:
+                    df_detail.loc[idx, "Giá trị"] = "Đang bật"
+                elif val == 0 and idx == FIELD_LABELS["blue_light_filter_active"]:
+                    df_detail.loc[idx, "Giá trị"] = "Đang tắt"
+
+            st.dataframe(df_detail, use_container_width=True)
 
     with col_right:
         st.subheader("💡 Khuyến nghị hành động cá nhân hóa")
@@ -319,7 +356,7 @@ with tab_whatif:
         new_filter = st.selectbox(
             "Thử trạng thái bộ lọc ánh sáng xanh:",
             options=[0, 1],
-            format_func=lambda x: "Bật (1)" if x == 1 else "Tắt (0)",
+            format_func=lambda x: "Bật" if x == 1 else "Tắt",
             index=1,
         )
         new_brightness = st.slider(
@@ -348,7 +385,7 @@ with tab_whatif:
         new_activity = st.slider(
             "Thử thời gian vận động trong ngày (phút):",
             min_value=int(NUMERIC_RANGES["physical_activity_min"][0]),
-            max_value=int(NUMERIC_RANGES["physical_activity_min"][1]),
+            max_value=120, 
             value=max(int(profile["physical_activity_min"]), 30),
             step=5,
         )

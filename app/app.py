@@ -46,7 +46,7 @@ st.markdown(
     .stAppDeployButton {display:none;}
     </style>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 # Nhãn tiếng Việt thân thiện cho các trường
@@ -66,16 +66,16 @@ FIELD_LABELS = {
 # Từ điển dịch thuật giá trị sang tiếng Việt (Hiển thị UI)
 DICTS_GIOI_TINH = {"Male": "Nam", "Female": "Nữ"}
 DICTS_NHIP_SINH_HOC = {
-    "Morning Lark": "Dậy sớm", 
-    "Intermediate": "Tiêu chuẩn", 
-    "Night Owl": "Thức khuya"
+    "Morning Lark": "Sơn ca (Dậy sớm)",
+    "Intermediate": "Trung gian (Tiêu chuẩn)",
+    "Night Owl": "Cú đêm (Thức khuya)",
 }
 DICTS_NGHE_NGHIEP = {
     "Student": "Sinh viên / Học sinh",
     "Corporate 9-to-5": "Nhân viên văn phòng (Giờ hành chính)",
     "Remote Tech": "Công nghệ / IT làm việc từ xa",
     "Freelance / Creative": "Làm tự do / Sáng tạo (Freelance)",
-    "Healthcare / Shift Worker": "Y tế / Làm ca"
+    "Healthcare / Shift Worker": "Y tế / Làm ca",
 }
 
 PRESET_PROFILES = {
@@ -117,12 +117,33 @@ PRESET_PROFILES = {
     },
 }
 
+
 def _badge_color(level: str) -> str:
     if level == "Thấp":
         return "green"
     if level == "Trung bình":
         return "orange"
     return "red"
+
+
+def _render_dataframe(df: pd.DataFrame) -> None:
+    """Hiển thị dataframe tương thích với cả Streamlit bản mới (width='stretch') và bản cũ."""
+    try:
+        st.dataframe(df, width="stretch")
+    except TypeError:
+        st.dataframe(df, use_container_width=True)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_evaluate_profile(profile_items: tuple) -> tuple[float, str, list[dict], list[dict]]:
+    """Bộ nhớ đệm kết quả dự đoán, khuyến nghị và xếp hạng giúp kéo thanh trượt mượt tức thì."""
+    prof = dict(profile_items)
+    r_val = predict_risk(prof)
+    r_lvl = risk_level(r_val)
+    r_recs = recommend(prof)
+    r_plans = rank_plans(prof, top_k=3)
+    return r_val, r_lvl, r_recs, r_plans
+
 
 # ---------------------------------------------------------------------------
 # Tiêu đề & Thanh bên (Sidebar nhập hồ sơ 10 trường)
@@ -157,7 +178,7 @@ with st.sidebar:
     blue_light_filter_active = st.selectbox(
         FIELD_LABELS["blue_light_filter_active"],
         options=[0, 1],
-        format_func=lambda x: "Đang bật" if x == 1 else "Đang tắt", 
+        format_func=lambda x: "Đang bật" if x == 1 else "Đang tắt",
         index=int(preset["blue_light_filter_active"]),
     )
     screen_brightness_pct = st.slider(
@@ -177,7 +198,7 @@ with st.sidebar:
     physical_activity_min = st.slider(
         FIELD_LABELS["physical_activity_min"],
         min_value=int(NUMERIC_RANGES["physical_activity_min"][0]),
-        max_value=120, 
+        max_value=120,
         value=int(preset["physical_activity_min"]),
         step=5,
     )
@@ -190,15 +211,12 @@ with st.sidebar:
         value=int(preset["age"]),
         step=1,
     )
-    
-    # Lọc danh sách: Chỉ giữ lại "Male" và "Female", loại bỏ "Non-binary"
+
     gender_options = [g for g in CATEGORY_VALUES["gender"] if g in ["Male", "Female"]]
-    
     gender = st.selectbox(
         FIELD_LABELS["gender"],
         options=gender_options,
         format_func=lambda x: DICTS_GIOI_TINH.get(x, x),
-        # Đảm bảo index không bị lỗi nếu hồ sơ mẫu lỡ chứa giá trị bị loại bỏ
         index=0 if preset["gender"] not in gender_options else gender_options.index(preset["gender"]),
     )
     occupation_type = st.selectbox(
@@ -214,11 +232,14 @@ with st.sidebar:
         index=CATEGORY_VALUES["chronotype"].index(preset["chronotype"]),
     )
 
+# Đảm bảo giá trị physical_activity_min truyền vào lớp quyết định không vượt quá giới hạn kiểm tra của preprocess.py
+safe_activity_min = min(physical_activity_min, int(NUMERIC_RANGES["physical_activity_min"][1]))
+
 profile = {
     "bedtime_phone_minutes": bedtime_phone_minutes,
     "screen_brightness_pct": screen_brightness_pct,
     "caffeine_post_5pm_mg": caffeine_post_5pm_mg,
-    "physical_activity_min": physical_activity_min,
+    "physical_activity_min": safe_activity_min,
     "blue_light_filter_active": blue_light_filter_active,
     "primary_bedtime_app": primary_bedtime_app,
     "age": age,
@@ -227,11 +248,11 @@ profile = {
     "chronotype": chronotype,
 }
 
-# Tính toán kết quả từ lớp quyết định
-current_risk = predict_risk(profile)
-current_level = risk_level(current_risk)
-recs = recommend(profile)
-top_plans = rank_plans(profile, top_k=3)
+# Tính toán kết quả từ lớp quyết định (đã bọc cache_data)
+current_risk, current_level, recs, top_plans = _cached_evaluate_profile(tuple(profile.items()))
+
+chrono_vn_label = DICTS_NHIP_SINH_HOC.get(profile["chronotype"], profile["chronotype"])
+occ_vn_label = DICTS_NGHE_NGHIEP.get(profile["occupation_type"], profile["occupation_type"])
 
 # ---------------------------------------------------------------------------
 # Giao diện chia làm 3 Tab rõ ràng
@@ -285,29 +306,30 @@ with tab_result:
 
         if profile["chronotype"] == "Night Owl":
             factors.append(
-                "- **Nhịp sinh học Cú đêm (Night Owl):** Yếu tố ngữ cảnh cố định có nguy cơ nền "
+                f"- **Nhịp sinh học {chrono_vn_label}:** Yếu tố ngữ cảnh cố định có nguy cơ nền "
                 "rất cao (~96% trong dữ liệu)."
             )
         elif profile["chronotype"] == "Morning Lark":
             factors.append(
-                "- **Nhịp sinh học Sơn ca (Morning Lark):** Yếu tố ngữ cảnh thuận lợi (~27% nguy cơ trong dữ liệu)."
+                f"- **Nhịp sinh học {chrono_vn_label}:** Yếu tố ngữ cảnh thuận lợi (~27% nguy cơ trong dữ liệu)."
             )
 
         if profile["occupation_type"] == "Healthcare / Shift Worker":
             factors.append(
-                "- **Đặc thù công việc làm ca (Healthcare / Shift Worker):** Nguy cơ nền cao (~90% trong dữ liệu)."
+                f"- **Đặc thù công việc ({occ_vn_label}):** Nguy cơ nền cao (~90% trong dữ liệu)."
             )
 
         for f in factors:
             st.markdown(f)
 
-        # Đã cập nhật để việt hóa cột Index và các giá trị tiếng Anh
         with st.expander("Xem chi tiết 10 trường đầu vào hiện tại"):
-            df_detail = pd.DataFrame([profile]).T.rename(
-                columns={0: "Giá trị"}, 
-                index=FIELD_LABELS
+            display_profile = dict(profile)
+            display_profile["physical_activity_min"] = physical_activity_min
+            df_detail = pd.DataFrame([display_profile]).T.rename(
+                columns={0: "Giá trị"},
+                index=FIELD_LABELS,
             )
-            
+
             for idx in df_detail.index:
                 val = df_detail.loc[idx, "Giá trị"]
                 if val in DICTS_GIOI_TINH:
@@ -321,7 +343,7 @@ with tab_result:
                 elif val == 0 and idx == FIELD_LABELS["blue_light_filter_active"]:
                     df_detail.loc[idx, "Giá trị"] = "Đang tắt"
 
-            st.dataframe(df_detail, use_container_width=True)
+            _render_dataframe(df_detail)
 
     with col_right:
         st.subheader("💡 Khuyến nghị hành động cá nhân hóa")
@@ -350,7 +372,9 @@ with tab_whatif:
             "Thử giảm số phút dùng điện thoại xuống (phút):",
             min_value=int(NUMERIC_RANGES["bedtime_phone_minutes"][0]),
             max_value=int(NUMERIC_RANGES["bedtime_phone_minutes"][1]),
-            value=max(0, int(profile["bedtime_phone_minutes"]) - 30),
+            value=max(15, int(profile["bedtime_phone_minutes"]) - 30)
+            if profile["bedtime_phone_minutes"] > 15
+            else int(profile["bedtime_phone_minutes"]),
             step=5,
         )
         new_filter = st.selectbox(
@@ -385,18 +409,19 @@ with tab_whatif:
         new_activity = st.slider(
             "Thử thời gian vận động trong ngày (phút):",
             min_value=int(NUMERIC_RANGES["physical_activity_min"][0]),
-            max_value=120, 
-            value=max(int(profile["physical_activity_min"]), 30),
+            max_value=120,
+            value=int(physical_activity_min),
             step=5,
         )
 
+    safe_new_activity = min(new_activity, int(NUMERIC_RANGES["physical_activity_min"][1]))
     changes_dict = {
         "bedtime_phone_minutes": new_minutes,
         "blue_light_filter_active": new_filter,
         "screen_brightness_pct": new_brightness,
         "primary_bedtime_app": new_app,
         "caffeine_post_5pm_mg": new_caffeine,
-        "physical_activity_min": new_activity,
+        "physical_activity_min": safe_new_activity,
     }
     sim_result = what_if(profile, changes_dict)
 
@@ -426,22 +451,28 @@ with tab_whatif:
     st.divider()
     st.subheader("🏆 Top 3 Phương án Giảm Nguy cơ Hiệu quả Nhất (Tự động xếp hạng)")
 
-    # Kiểm tra trung thực cho nhóm có nguy cơ nền cao (Night Owl / Shift Worker)
+    # Kiểm tra trung thực cho nhóm có nguy cơ nền cao (đã Việt hóa hoàn toàn tên nhóm)
     any_below_medium = any(p["xuong_muc_trung_binh_hoac_thap"] for p in top_plans)
     any_below_low = any(p["xuong_duoi_trung_binh"] for p in top_plans)
 
-    if not any_below_medium:
+    if not any_below_medium and current_level == "Cao":
         st.warning(
             "⚠️ **Thông báo trung thực từ mô hình:** Giảm số phút dùng điện thoại và điều chỉnh "
             "thói quen giúp giảm nguy cơ nợ ngủ nhưng **chưa đủ để đưa nguy cơ xuống mức Trung bình hoặc Thấp**. "
-            f"Nguyên nhân là do yếu tố ngữ cảnh cố định trong hồ sơ của bạn (Nhịp sinh học: **{profile['chronotype']}**, "
-            f"Nghề nghiệp: **{profile['occupation_type']}**) có nguy cơ nền rất cao trong dữ liệu (nhóm Night Owl "
+            f"Nguyên nhân là do yếu tố ngữ cảnh cố định trong hồ sơ của bạn (Nhịp sinh học: **{chrono_vn_label}**, "
+            f"Nghề nghiệp: **{occ_vn_label}**) có nguy cơ nền rất cao trong dữ liệu (nhóm Cú đêm "
             "dù dùng máy dưới 30 phút vẫn có tỉ lệ nợ ngủ khoảng 87%)."
         )
     elif not any_below_low and current_level != "Thấp":
         st.info(
             "ℹ️ **Lưu ý:** Các phương án bên dưới giúp đưa nguy cơ xuống mức **Trung bình**, nhưng chưa xuống "
             "được mức **Thấp (< 30%)** do ảnh hưởng nền từ nhịp sinh học hoặc đặc thù công việc."
+        )
+
+    if current_level == "Thấp" and current_risk < 0.05:
+        st.success(
+            "🎉 Hồ sơ hiện tại của bạn đã ở mức nguy cơ rất thấp (tối ưu). "
+            "Bảng dưới đây chỉ minh họa các điều chỉnh nhỏ nếu muốn duy trì hoặc tối ưu thêm."
         )
 
     if top_plans:
@@ -460,7 +491,8 @@ with tab_whatif:
             )
         st.table(pd.DataFrame(display_rows))
 
-        if min_effort_note:
+        # Chỉ hiển thị khung phương án ít nỗ lực nhất khi mức hiện tại CHƯA phải là Thấp
+        if min_effort_note and current_level != "Thấp":
             st.success(
                 f"✨ **Phương án tốn ít nỗ lực nhất để đạt ngưỡng an toàn hơn:** {min_effort_note}"
             )
@@ -476,17 +508,17 @@ with tab_model:
 
     if metrics_path.exists():
         st.markdown("**1. Kết quả đánh giá trên tập kiểm tra (`models/metrics.csv`):**")
-        st.dataframe(pd.read_csv(metrics_path), use_container_width=True)
+        _render_dataframe(pd.read_csv(metrics_path))
     else:
         st.info("Chưa tìm thấy file `models/metrics.csv`.")
 
     if cv_metrics_path.exists():
         st.markdown("**2. Kết quả Cross-Validation 5-fold (`models/cv_metrics.csv`):**")
-        st.dataframe(pd.read_csv(cv_metrics_path), use_container_width=True)
+        _render_dataframe(pd.read_csv(cv_metrics_path))
 
     if fi_path.exists():
         st.markdown("**3. Độ quan trọng của đặc trưng (`models/feature_importance.csv`):**")
-        st.dataframe(pd.read_csv(fi_path), use_container_width=True)
+        _render_dataframe(pd.read_csv(fi_path))
 
     st.divider()
     st.subheader("⚠️ Hạn chế của Hệ thống & Lưu ý Quan trọng")

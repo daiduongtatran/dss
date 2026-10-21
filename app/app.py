@@ -103,7 +103,7 @@ PRESET_PROFILES = {
         "occupation_type": "Corporate 9-to-5",
         "chronotype": "Morning Lark",
     },
-    "Cú đêm / Làm ca (Nguy cơ nền rất cao)": {
+    "Cú đêm / Làm ca đêm (Nguy cơ nền rất cao)": {
         "bedtime_phone_minutes": 95,
         "screen_brightness_pct": 75,
         "caffeine_post_5pm_mg": 160,

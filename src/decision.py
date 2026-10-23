@@ -1,6 +1,5 @@
 """
-src/decision.py - Lớp quyết định cho hệ thống hỗ trợ quyết định (DSS)
-Người phụ trách: Chính
+
 
 Cung cấp đúng 6 hàm theo hợp đồng chung của nhóm:
     1. load_model()
@@ -30,12 +29,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.preprocess import (
-    CATEGORY_VALUES,
     CONTEXT_VARS,
     DECISION_VARS,
     FEATURES,
-    NUMERIC_RANGES,
-    VALID_LIMITS,
     build_preprocessor,
     prepare_data,
     profile_to_frame,
@@ -45,11 +41,11 @@ from src.preprocess import (
 # Cấu hình ngưỡng & đường dẫn
 # ---------------------------------------------------------------------------
 MODEL_PATH = ROOT / "models" / "model.joblib"
-FEATURE_IMPORTANCE_PATH = ROOT / "models" / "feature_importance.csv"
 
 LOW_RISK_THRESHOLD = 0.30   # < 0.30: Thấp
 HIGH_RISK_THRESHOLD = 0.60  # >= 0.60: Cao (0.30 <= p < 0.60: Trung bình)
 MIN_PHONE_MINUTES_FLOOR = 15  # Mức sàn thực tế khi gợi ý giảm thời gian dùng máy
+MIN_MEANINGFUL_DROP = 0.005   # Phương án phải giảm ít nhất 0,5 điểm % mới được đưa vào xếp hạng
 
 HIGH_STIMULATION_APPS = {
     "TikTok / Reels",
@@ -553,9 +549,12 @@ def rank_plans(profile: dict, top_k: int = 3) -> list[dict]:
             best_min_effort_plan = min(med_target_plans, key=lambda x: (x["no_luc"], x["sau"]))
             best_min_effort_plan["it_no_luc_nhat"] = True
 
-    # 4. Lọc nhiễu và đa dạng hóa hướng thay đổi để Top 3 không bị trùng lặp
-    positive_plans = [c for c in candidates if c["muc_giam"] > 0]
-    pool = positive_plans if positive_plans else candidates
+    # 4. Lọc nhiễu: chỉ giữ phương án giảm nguy cơ có ý nghĩa (>= 0,5 điểm %).
+    #    Nếu không phương án nào đạt (ví dụ hồ sơ đã ~0% hoặc nguy cơ nền ~100%),
+    #    trả về danh sách rỗng để app giải thích thay vì hiện phương án vô nghĩa.
+    pool = [c for c in candidates if c["muc_giam"] >= MIN_MEANINGFUL_DROP]
+    if not pool:
+        return []
 
     # Sắp xếp ưu tiên mức giảm cao, nhưng nếu mức giảm chênh nhau không đáng kể (< 0.5% = 0.005)
     # thì ưu tiên phương án gọn gàng, tốn ít nỗ lực hơn (tránh ôm đồm mọi biến chỉ để thêm 0.1%)
@@ -612,11 +611,20 @@ def rank_plans(profile: dict, top_k: int = 3) -> list[dict]:
 
     # Sắp xếp lại top_k theo đúng thứ tự mức giảm nguy cơ từ cao xuống thấp
     top_plans.sort(key=lambda x: (-round(x["muc_giam"], 6), x["no_luc"]))
+    least_effort_info = None
+    if best_min_effort_plan:
+        least_effort_info = {
+            "phuong_an": best_min_effort_plan["phuong_an"],
+            "sau": best_min_effort_plan["sau"],
+            "muc_sau": best_min_effort_plan["muc_sau"],
+            "no_luc": best_min_effort_plan["no_luc"],
+        }
     for idx, item in enumerate(top_plans, start=1):
         item["hang"] = idx
         item["phuong_an_it_no_luc_nhat_toan_bo"] = (
-            best_min_effort_plan["phuong_an"] if best_min_effort_plan else None
+            least_effort_info["phuong_an"] if least_effort_info else None
         )
+        item["it_no_luc_nhat_chi_tiet"] = least_effort_info
 
     return top_plans
 

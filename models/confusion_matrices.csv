@@ -1,5 +1,8 @@
 model,tn,fp,fn,tp
 Most frequent,0,678,0,1022
 Logistic Regression,579,99,148,874
+KNN,532,146,130,892
+Decision Tree,564,114,129,893
 Random Forest,562,116,128,894
 XGBoost,568,110,126,896
+ANN (MLP),550,128,113,909

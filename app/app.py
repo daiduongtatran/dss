@@ -1,6 +1,5 @@
 """
-app/app.py - Giao diện Streamlit cho Hệ thống hỗ trợ quyết định (DSS)
-Người phụ trách: Chính
+
 
 Chạy ứng dụng từ thư mục gốc (dss/):
     streamlit run app/app.py
@@ -64,7 +63,7 @@ FIELD_LABELS = {
 }
 
 # Từ điển dịch thuật giá trị sang tiếng Việt (Hiển thị UI)
-DICTS_GIOI_TINH = {"Male": "Nam", "Female": "Nữ"}
+DICTS_GIOI_TINH = {"Male": "Nam", "Female": "Nữ", "Non-Binary": "Khác (phi nhị nguyên)"}
 DICTS_NHIP_SINH_HOC = {
     "Morning Lark": "Sơn ca (Dậy sớm)",
     "Intermediate": "Trung gian (Tiêu chuẩn)",
@@ -198,9 +197,9 @@ with st.sidebar:
     physical_activity_min = st.slider(
         FIELD_LABELS["physical_activity_min"],
         min_value=int(NUMERIC_RANGES["physical_activity_min"][0]),
-        max_value=120,
+        max_value=int(NUMERIC_RANGES["physical_activity_min"][1]),
         value=int(preset["physical_activity_min"]),
-        step=5,
+        step=1,
     )
 
     st.subheader("B. Thông tin ngữ cảnh (Cố định)")
@@ -212,12 +211,12 @@ with st.sidebar:
         step=1,
     )
 
-    gender_options = [g for g in CATEGORY_VALUES["gender"] if g in ["Male", "Female"]]
+    gender_options = CATEGORY_VALUES["gender"]
     gender = st.selectbox(
         FIELD_LABELS["gender"],
         options=gender_options,
         format_func=lambda x: DICTS_GIOI_TINH.get(x, x),
-        index=0 if preset["gender"] not in gender_options else gender_options.index(preset["gender"]),
+        index=gender_options.index(preset["gender"]),
     )
     occupation_type = st.selectbox(
         FIELD_LABELS["occupation_type"],
@@ -232,14 +231,11 @@ with st.sidebar:
         index=CATEGORY_VALUES["chronotype"].index(preset["chronotype"]),
     )
 
-# Đảm bảo giá trị physical_activity_min truyền vào lớp quyết định không vượt quá giới hạn kiểm tra của preprocess.py
-safe_activity_min = min(physical_activity_min, int(NUMERIC_RANGES["physical_activity_min"][1]))
-
 profile = {
     "bedtime_phone_minutes": bedtime_phone_minutes,
     "screen_brightness_pct": screen_brightness_pct,
     "caffeine_post_5pm_mg": caffeine_post_5pm_mg,
-    "physical_activity_min": safe_activity_min,
+    "physical_activity_min": physical_activity_min,
     "blue_light_filter_active": blue_light_filter_active,
     "primary_bedtime_app": primary_bedtime_app,
     "age": age,
@@ -323,9 +319,7 @@ with tab_result:
             st.markdown(f)
 
         with st.expander("Xem chi tiết 10 trường đầu vào hiện tại"):
-            display_profile = dict(profile)
-            display_profile["physical_activity_min"] = physical_activity_min
-            df_detail = pd.DataFrame([display_profile]).T.rename(
+            df_detail = pd.DataFrame([profile]).T.rename(
                 columns={0: "Giá trị"},
                 index=FIELD_LABELS,
             )
@@ -406,22 +400,17 @@ with tab_whatif:
             value=0 if profile["caffeine_post_5pm_mg"] > 0 else int(profile["caffeine_post_5pm_mg"]),
             step=10,
         )
-        new_activity = st.slider(
-            "Thử thời gian vận động trong ngày (phút):",
-            min_value=int(NUMERIC_RANGES["physical_activity_min"][0]),
-            max_value=120,
-            value=int(physical_activity_min),
-            step=5,
+        st.caption(
+            "Thời gian vận động không đưa vào mô phỏng: trong dữ liệu, tỉ lệ nợ ngủ gần như "
+            "không đổi theo mức vận động (59–61%), nên mô hình không cho kết luận đáng tin về biến này."
         )
 
-    safe_new_activity = min(new_activity, int(NUMERIC_RANGES["physical_activity_min"][1]))
     changes_dict = {
         "bedtime_phone_minutes": new_minutes,
         "blue_light_filter_active": new_filter,
         "screen_brightness_pct": new_brightness,
         "primary_bedtime_app": new_app,
         "caffeine_post_5pm_mg": new_caffeine,
-        "physical_activity_min": safe_new_activity,
     }
     sim_result = what_if(profile, changes_dict)
 
@@ -469,7 +458,7 @@ with tab_whatif:
             "được mức **Thấp (< 30%)** do ảnh hưởng nền từ nhịp sinh học hoặc đặc thù công việc."
         )
 
-    if current_level == "Thấp" and current_risk < 0.05:
+    if current_level == "Thấp" and current_risk < 0.05 and top_plans:
         st.success(
             "🎉 Hồ sơ hiện tại của bạn đã ở mức nguy cơ rất thấp (tối ưu). "
             "Bảng dưới đây chỉ minh họa các điều chỉnh nhỏ nếu muốn duy trì hoặc tối ưu thêm."
@@ -477,7 +466,7 @@ with tab_whatif:
 
     if top_plans:
         display_rows = []
-        min_effort_note = top_plans[0].get("phuong_an_it_no_luc_nhat_toan_bo")
+        min_effort = top_plans[0].get("it_no_luc_nhat_chi_tiet")
         for p in top_plans:
             display_rows.append(
                 {
@@ -492,33 +481,67 @@ with tab_whatif:
         st.table(pd.DataFrame(display_rows))
 
         # Chỉ hiển thị khung phương án ít nỗ lực nhất khi mức hiện tại CHƯA phải là Thấp
-        if min_effort_note and current_level != "Thấp":
+        if min_effort and current_level != "Thấp":
             st.success(
-                f"✨ **Phương án tốn ít nỗ lực nhất để đạt ngưỡng an toàn hơn:** {min_effort_note}"
+                f"✨ **Phương án tốn ít nỗ lực nhất để hạ mức nguy cơ:** {min_effort['phuong_an']} "
+                f"→ nguy cơ còn **{min_effort['sau']*100:.1f}%** ({min_effort['muc_sau']}), "
+                f"điểm nỗ lực {min_effort['no_luc']}."
             )
+    elif current_level == "Thấp":
+        st.info("Hồ sơ của bạn đã ở mức nguy cơ thấp, không cần thay đổi thêm.")
     else:
-        st.info("Hồ sơ của bạn đã ở mức tối ưu, không cần thay đổi thêm.")
+        st.info(
+            "Không có phương án nào trong lưới thử nghiệm giảm được nguy cơ từ 0,5 điểm % trở lên. "
+            "Nguy cơ của hồ sơ này chủ yếu đến từ các yếu tố ngữ cảnh cố định."
+        )
 
 # === TAB 3: THÔNG TIN MÔ HÌNH & GIỚI HẠN ===
 with tab_model:
+    MODELS = ROOT / "models"
+    FIGURES = ROOT / "reports" / "figures"
+
+    deployed = load_model()
+    deployed_name = type(getattr(deployed, "named_steps", {}).get("model", deployed)).__name__
     st.subheader("📈 Bảng So sánh Hiệu năng các Mô hình Học máy")
-    metrics_path = ROOT / "models" / "metrics.csv"
-    cv_metrics_path = ROOT / "models" / "cv_metrics.csv"
-    fi_path = ROOT / "models" / "feature_importance.csv"
+    st.caption(f"Mô hình đang dùng trong ứng dụng: **{deployed_name}** (`models/model.joblib`).")
 
-    if metrics_path.exists():
-        st.markdown("**1. Kết quả đánh giá trên tập kiểm tra (`models/metrics.csv`):**")
-        _render_dataframe(pd.read_csv(metrics_path))
-    else:
-        st.info("Chưa tìm thấy file `models/metrics.csv`.")
+    def _show_csv(title: str, filename: str, note: str | None = None) -> None:
+        path = MODELS / filename
+        if path.exists():
+            st.markdown(f"**{title}** (`models/{filename}`)")
+            _render_dataframe(pd.read_csv(path).round(4))
+            if note:
+                st.caption(note)
 
-    if cv_metrics_path.exists():
-        st.markdown("**2. Kết quả Cross-Validation 5-fold (`models/cv_metrics.csv`):**")
-        _render_dataframe(pd.read_csv(cv_metrics_path))
+    def _show_image(filename: str, caption: str) -> None:
+        path = FIGURES / filename
+        if path.exists():
+            st.image(str(path), caption=caption)
 
-    if fi_path.exists():
-        st.markdown("**3. Độ quan trọng của đặc trưng (`models/feature_importance.csv`):**")
-        _render_dataframe(pd.read_csv(fi_path))
+    if not (MODELS / "metrics.csv").exists():
+        st.info("Chưa có kết quả mô hình. Chạy `python src/train.py` để tạo.")
+
+    _show_csv("1. Kết quả trên tập kiểm tra", "metrics.csv")
+    _show_csv("2. Cross-validation 5-fold trên tập huấn luyện", "cv_metrics.csv")
+    col_roc, col_cm = st.columns(2)
+    with col_roc:
+        _show_image("roc_curves.png", "Đường ROC của các mô hình")
+    with col_cm:
+        _show_image("confusion_matrices.png", "Ma trận nhầm lẫn")
+    _show_csv(
+        "3. Thí nghiệm rò rỉ dữ liệu",
+        "leakage_comparison.csv",
+        "Đưa cột kết quả giấc ngủ vào làm đầu vào cho ROC-AUC gần 1,0: mô hình 'gian lận' "
+        "vì nhãn được tính từ chính các cột đó. Bản đúng (False) mới phản ánh năng lực thật.",
+    )
+    _show_csv(
+        "4. Phân tích ngưỡng xác suất",
+        "threshold_analysis.csv",
+        "Ngưỡng càng thấp thì bắt được càng nhiều người có nguy cơ (Recall cao) nhưng cảnh báo nhầm nhiều hơn. "
+        f"Ứng dụng dùng {LOW_RISK_THRESHOLD:.0%} và {HIGH_RISK_THRESHOLD:.0%} để chia ba mức nguy cơ.",
+    )
+    _show_csv("5. Độ quan trọng của đặc trưng", "feature_importance.csv")
+    _show_image("feature_importance.png", "10 đặc trưng quan trọng nhất")
 
     st.divider()
     st.subheader("⚠️ Hạn chế của Hệ thống & Lưu ý Quan trọng")
